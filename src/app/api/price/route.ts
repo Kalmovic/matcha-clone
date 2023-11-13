@@ -11,7 +11,7 @@ export async function GET(req: NextApiRequest, res: NextApiResponse) {
         revalidate: 120,
       },
       headers: {
-        "0x-api-key": "c9f13c84-9fcb-4f42-aa30-a11b0d016aa5", // TODO: move to env
+        "0x-api-key": process.env.NEXT_PUBLIC_0X_API_KEY as string,
       },
     }
   );
