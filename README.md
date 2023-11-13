@@ -2,7 +2,7 @@ This is a [wagmi](https://wagmi.sh) + [ConnectKit](https://docs.family.co/connec
 
 # About
 
-This is a clone from (matcha)[https://matcha.xyz/tokens/ethereum/eth] interface + functionality using 0x api for Swap and CoinGecko for price feed.
+This is a clone from [matcha](https://matcha.xyz/tokens/ethereum/eth) interface + functionality using 0x api for Swap and CoinGecko for price feed.
 
 ![Interface](interface-demo.png)
 
