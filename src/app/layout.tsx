@@ -4,7 +4,7 @@ import { Inter } from "next/font/google";
 import { Providers } from "./providers";
 import { cn } from "../libs/libs";
 export const metadata = {
-  title: "wagmi",
+  title: "Matcha Clone",
 };
 const inter = Inter({ subsets: ["latin"] });
 
