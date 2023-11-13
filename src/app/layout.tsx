@@ -1,19 +1,31 @@
-import { Providers } from './providers'
-
+import "./globals.css";
+import NavBar from "../components/sections/NavBar";
+import { Inter } from "next/font/google";
+import { Providers } from "./providers";
+import { cn } from "../libs/libs";
 export const metadata = {
-  title: 'wagmi',
-}
+  title: "wagmi",
+};
+const inter = Inter({ subsets: ["latin"] });
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <html lang="en">
-      <body>
-        <Providers>{children}</Providers>
+      <body
+        className={cn(
+          inter.className,
+          "bg-gradient-to-b from-orange-50 to-white"
+        )}
+      >
+        <Providers>
+          <NavBar />
+          {children}
+        </Providers>
       </body>
     </html>
-  )
+  );
 }
