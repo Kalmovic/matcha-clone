@@ -19,24 +19,26 @@ type ConfirmWizardState = {
   data: PriceResponse;
 };
 
+type WizardState = SwapWizardState | ConfirmWizardState;
+
 function SwapWizard() {
-  const [wizardState, setWizardState] = React.useState({
-    kind: "swap",
+  const [wizardState, setWizardState] = React.useState<WizardState>({
+    kind: WizardKind.SWAP,
     data: {},
   });
 
   const onSwapReady = (data: PriceResponse) => {
-    // setWizardState({
-    //   kind: "confirm",
-    //   data,
-    // });
+    setWizardState({
+      kind: WizardKind.CONFIRM,
+      data,
+    });
   };
 
   switch (wizardState.kind) {
     case WizardKind.SWAP:
       return <Swap onReady={onSwapReady} />;
     case WizardKind.CONFIRM:
-      return <Confirmation />;
+      return <Confirmation data={wizardState.data} />;
   }
 }
 

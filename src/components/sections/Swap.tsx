@@ -23,12 +23,24 @@ import Image from "next/image";
 import * as z from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { POLYGON_TOKENS, POLYGON_TOKENS_BY_SYMBOL } from "../../libs/constants";
+import {
+  MAX_ALLOWANCE,
+  POLYGON_TOKENS,
+  POLYGON_TOKENS_BY_SYMBOL,
+  exchangeProxy,
+} from "../../libs/constants";
 import useSWR from "swr";
-import { formatUnits, parseUnits } from "viem";
+import { Address, formatUnits, parseUnits } from "viem";
 import QueryString from "qs";
 import { PriceResponse } from "../../app/api/types";
-import { useAccount } from "wagmi";
+import {
+  erc20ABI,
+  useAccount,
+  useContractRead,
+  useContractWrite,
+  usePrepareContractWrite,
+  useWaitForTransaction,
+} from "wagmi";
 import { Separator } from "../ui/separator";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent } from "../ui/card";
@@ -96,11 +108,86 @@ export const fetcher = ([endpoint, params]: [string, PriceRequestParams]) => {
   return fetch(`${endpoint}?${query}`).then((res) => res.json());
 };
 
+function ApproveOrReviewButton({
+  takerAddress,
+  sellToken,
+  onClick,
+  disabled,
+}: {
+  takerAddress: Address;
+  onClick: () => void;
+  sellToken: (typeof POLYGON_TOKENS)[number];
+  disabled?: boolean;
+}) {
+  // 1. Read from erc20, does spender (0x Exchange Proxy) have allowance?
+  const {
+    data: allowance,
+    refetch,
+    error: errorContractRead,
+  } = useContractRead({
+    address: sellToken.address as Address,
+    abi: erc20ABI,
+    functionName: "allowance",
+    args: [takerAddress, exchangeProxy],
+  });
+
+  // 2. (only if no allowance): write to erc20, approve 0x Exchange Proxy to spend max integer
+  const { config } = usePrepareContractWrite({
+    address: sellToken.address as Address,
+    abi: erc20ABI,
+    functionName: "approve",
+    args: [exchangeProxy, MAX_ALLOWANCE],
+  });
+
+  const {
+    data: writeContractResult,
+    writeAsync: approveAsync,
+    error,
+  } = useContractWrite(config);
+
+  const { isLoading: isApproving } = useWaitForTransaction({
+    hash: writeContractResult ? writeContractResult.hash : undefined,
+    onSuccess(data) {
+      refetch();
+    },
+  });
+
+  if (error) {
+    return <div>Something went wrong: {error.message}</div>;
+  }
+
+  if (allowance === 0 && approveAsync) {
+    return (
+      <>
+        <button
+          type="button"
+          // className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full"
+          onClick={async () => {
+            await approveAsync();
+          }}
+        >
+          {isApproving ? "Approving…" : "Approve"}
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <Button
+      type="submit"
+      disabled={disabled}
+      onClick={onClick}
+      className="w-full bg-emerald-600 hover:bg-emerald-700"
+    >
+      {disabled ? "Insufficient Balance" : "Swap"}
+    </Button>
+  );
+}
+
 function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
   const { address } = useAccount();
   const [tradeDirection, setTradeDirection] = React.useState("sell");
-  const [isLoading, setIsLoading] = React.useState(false);
-  const [swapPrice, setSwapPrice] = React.useState({});
+  const [swapPrice, setSwapPrice] = React.useState({} as PriceResponse);
   const [openFromTokens, setOpenFromTokens] = React.useState(false);
   const [openToTokens, setOpenToTokens] = React.useState(false);
   const router = useRouter();
@@ -120,68 +207,43 @@ function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
   );
   const fsym = searchParams.get("fsym");
   const tsym = searchParams.get("tsym");
-  const defaultSellToken = POLYGON_TOKENS[0];
-  const defaultBuyToken = POLYGON_TOKENS[1];
+  const sellToken = fsym
+    ? POLYGON_TOKENS_BY_SYMBOL[fsym.toLocaleLowerCase()]
+    : POLYGON_TOKENS[0];
+  const buyToken = tsym
+    ? POLYGON_TOKENS_BY_SYMBOL[tsym.toLocaleLowerCase()]
+    : POLYGON_TOKENS[1];
   const form = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
       sellAmount: "",
       buyAmount: "",
-      sellToken: fsym
-        ? POLYGON_TOKENS_BY_SYMBOL[fsym.toLocaleLowerCase()]
-        : defaultSellToken,
-      buyToken: tsym
-        ? POLYGON_TOKENS_BY_SYMBOL[tsym.toLocaleLowerCase()]
-        : defaultBuyToken,
+      sellToken,
+      buyToken,
     },
   });
 
   const sellAmount = form.watch("sellAmount");
   const buyAmount = form.watch("buyAmount");
-  const sellToken = form.watch("sellToken");
-  const buyToken = form.watch("buyToken");
 
   useEffect(() => {
     if (!fsym && !tsym) {
       router.replace(
         `${pathname}?${createQueryString(
           "fsym",
-          defaultSellToken.symbol
-        )}&${createQueryString("tsym", defaultBuyToken.symbol)}`
+          sellToken.symbol
+        )}&${createQueryString("tsym", buyToken.symbol)}`
       );
     }
   }, [
     fsym,
     tsym,
-    defaultSellToken.symbol,
-    defaultBuyToken.symbol,
+    sellToken.symbol,
+    buyToken.symbol,
     pathname,
     createQueryString,
     router,
   ]);
-
-  // React.useEffect(() => {
-  //   if (fsym === defaultSellToken.symbol && tsym === defaultBuyToken.symbol) {
-  //     return;
-  //   }
-  //   if (!fsym && !tsym) {
-  //     form.setValue(
-  //       "sellToken",
-  //       POLYGON_TOKENS_BY_SYMBOL[defaultSellToken.symbol.toLocaleLowerCase()]
-  //     );
-  //     form.setValue(
-  //       "buyToken",
-  //       POLYGON_TOKENS_BY_SYMBOL[defaultBuyToken.symbol.toLocaleLowerCase()]
-  //     );
-  // router.replace(
-  //   `${pathname}?${createQueryString("fsym", defaultSellToken.symbol)}${
-  //     buyToken.symbol
-  //       ? `&${createQueryString("tsym", defaultBuyToken.symbol)}`
-  //       : ""
-  //   }`
-  // );
-  //   }
-  // }, [fsym, tsym, defaultSellToken.symbol, defaultBuyToken.symbol]);
 
   const sellPolygonToken =
     POLYGON_TOKENS_BY_SYMBOL[sellToken?.symbol.toLowerCase()];
@@ -190,8 +252,7 @@ function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
 
   const parsedSellAmount =
     sellAmount && tradeDirection === "sell"
-      ? // sellAmount
-        parseUnits(
+      ? parseUnits(
           `${Number(sellAmount)}`,
           sellPolygonToken?.decimals
         ).toString()
@@ -199,8 +260,7 @@ function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
 
   const parsedBuyAmount =
     buyAmount && tradeDirection === "buy"
-      ? // buyAmount
-        parseUnits(`${Number(buyAmount)}`, buyPolygonToken?.decimals).toString()
+      ? parseUnits(`${Number(buyAmount)}`, buyPolygonToken?.decimals).toString()
       : undefined;
 
   const { isLoading: isLoadingPrice, data: priceData } = useSWR(
@@ -235,8 +295,8 @@ function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
     }
   );
 
-  const onSubmit = async (data: any) => {
-    console.log(data);
+  const onSubmit = () => {
+    onReady(swapPrice as PriceResponse);
   };
 
   return (
@@ -512,15 +572,15 @@ function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
                 {!swapPrice?.gasPrice
                   ? 0
                   : // : Number(formatUnits(BigInt(swapPrice?.gasPrice), 100))}
-                    swapPrice?.gasPrice / 10000000000000}
+                    Number(swapPrice.gasPrice) / 10000000000000}
               </span>
               <br />
-              <Button
+              {/* <Button
                 type="submit"
                 className="w-full bg-emerald-600"
                 disabled={
-                  sellAmount <= 0 ||
-                  buyAmount <= 0 ||
+                  Number(sellAmount) <= 0 ||
+                  Number(buyAmount) <= 0 ||
                   !address ||
                   isLoadingPrice
                 }
@@ -533,7 +593,22 @@ function Swap({ onReady }: { onReady: (data: PriceResponse) => void }) {
                 ) : (
                   <span>Swap</span>
                 )}
-              </Button>
+              </Button> */}
+              {address ? (
+                <ApproveOrReviewButton
+                  takerAddress={address}
+                  sellToken={sellToken}
+                  onClick={() => {
+                    onReady(swapPrice as PriceResponse);
+                  }}
+                  disabled={
+                    Number(sellAmount) <= 0 ||
+                    Number(buyAmount) <= 0 ||
+                    !address ||
+                    isLoadingPrice
+                  }
+                />
+              ) : null}
             </form>
           </Form>
         </CardContent>
